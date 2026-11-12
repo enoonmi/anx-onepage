@@ -86,6 +86,15 @@ def make_epub(payload: bytes) -> bytes:
     return EPUB_TEMPLATE + payload
 
 
+def _mtime_of(path: pathlib.Path) -> int:
+    """The mtime the mock server will report for this file, in Unix seconds.
+
+    The mock renders <D:getlastmodified> from the file's mtime, and the planner
+    compares in whole seconds, so truncating here is what makes a Skip possible.
+    """
+    return int(path.stat().st_mtime)
+
+
 def build_fixture(base: pathlib.Path) -> dict:
     """Create the remote tree and return the book list for assertions."""
     files_dir = base / "anx" / "data" / "file"
@@ -368,12 +377,14 @@ def main() -> int:
 
         # 5. The planner must have refused the non-book names, and picked exactly
         #    the real books. Cross-checked against the probe's own plan line.
-        match = re.search(r"plan:\s*(\d+) to download,\s*(\d+) to skip,\s*(\d+) ignored",
-                          completed.stdout)
+        match = re.search(
+            r"plan:\s*(\d+) download,\s*(\d+) replace,\s*(\d+) skip,\s*(\d+) ignored",
+            completed.stdout,
+        )
         if match is None:
             problems.append("the probe did not report a plan line to check")
         else:
-            downloaded, _skipped, ignored = (int(g) for g in match.groups())
+            downloaded, _replaced, _skipped, ignored = (int(g) for g in match.groups())
             if info["rejected_names"] and ignored == 0:
                 problems.append(
                     f"the planner ignored nothing, but the server holds "
@@ -382,6 +393,70 @@ def main() -> int:
             expected = info["expected_downloads"]
             if downloaded != expected:
                 problems.append(f"planned {downloaded} downloads, expected {expected}")
+
+        # 5b. Incremental sync: a device that already holds every book, with the
+        #     exact size and mtime the server reports, must plan zero downloads.
+        #     This is the everyday case - without it the device would re-fetch
+        #     the whole library on every sync.
+        local_specs = []
+        for remote_file in sorted((fixture / "anx" / "data" / "file").iterdir()):
+            if not remote_file.is_file() or not remote_file.name.endswith(".epub"):
+                continue
+            if remote_file.name in info["rejected_names"]:
+                continue
+            local_specs.append(
+                f"{remote_file.name}:{remote_file.stat().st_size}:{_mtime_of(remote_file)}"
+            )
+
+        second = subprocess.run(
+            [str(exe), "--port", str(port), "--user", AUTH_USER, "--password", AUTH_PASSWORD]
+            + [arg for spec in local_specs for arg in ("--local", spec)],
+            text=True,
+            capture_output=True,
+            timeout=120,
+        )
+        match = re.search(
+            r"plan:\s*(\d+) download,\s*(\d+) replace,\s*(\d+) skip,\s*(\d+) ignored",
+            second.stdout,
+        )
+        if match is None:
+            problems.append("the incremental run did not report a plan line")
+        else:
+            dl, rep, sk, _ign = (int(g) for g in match.groups())
+            if dl + rep != 0:
+                problems.append(
+                    f"incremental sync wanted to fetch {dl + rep} book(s) even though "
+                    f"every local copy matches the server (skip={sk})"
+                )
+            if sk == 0:
+                problems.append("incremental sync skipped nothing - it should skip everything")
+
+        # 5c. A book the DEVICE has but the SERVER does not must be reported as
+        #     local-only and must not be deleted. Writing it into the served
+        #     directory would make it a remote book and prove nothing, so the
+        #     check is done purely with --local. Deleting the user's books is
+        #     not this feature's job.
+        ghost_name = "deadbeefdeadbeefdeadbeefdeadbeef.epub"
+        ghost_size = 44
+        ghost_mtime = 1762900000
+        third = subprocess.run(
+            [str(exe), "--port", str(port), "--user", AUTH_USER, "--password", AUTH_PASSWORD]
+            + [arg for spec in local_specs for arg in ("--local", spec)]
+            + ["--local", f"{ghost_name}:{ghost_size}:{ghost_mtime}"],
+            text=True,
+            capture_output=True,
+            timeout=120,
+        )
+        if "local-only" not in third.stdout:
+            problems.append("the incremental run did not report a local-only count")
+        else:
+            local_only_match = re.search(r",\s*(\d+) local-only", third.stdout)
+            if local_only_match is None:
+                problems.append("could not read the local-only count from the plan line")
+            elif int(local_only_match.group(1)) < 1:
+                problems.append(
+                    "a local book with no remote counterpart was not reported as local-only"
+                )
 
         # 6. Nothing outside anx/onepage/ should have been created.
         onepage_dir = fixture / "anx" / "onepage"
@@ -419,6 +494,8 @@ def main() -> int:
     print("  database7.db is byte-identical (never written)")
     print("  a book added on the phone is not deleted")
     print("  nothing is created outside anx/onepage/")
+    print("  incremental: a device holding every book fetches nothing")
+    print("  a local book absent from the server is reported, not dropped")
     print("\nSESSION VERIFIED")
     print("Note: this exercises the real C++ modules over real HTTP against")
     print("      tools/mock_webdav.py. It does not prove the firmware compiles")
