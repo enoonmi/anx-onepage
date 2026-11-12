@@ -8,9 +8,10 @@
 | 能力 | 状态 | 影响 |
 |---|---|---|
 | MSVC 2022 BuildTools | ✅ | 可真正编译 + 跑单测 |
-| PlatformIO | ❌ 装不上（pip 权限/网络、venv ensurepip 失败） | 固件交叉编译跑不了 |
+| PlatformIO | ❌ 装不上（见「阻塞点」） | 固件交叉编译跑不了 |
+| Dart / Flutter SDK | ❌ 无 | anx-reader 补丁无法 analyze |
 | ESP32-C61 真机 | ❌ | 渲染/功耗/WiFi/TLS 无法验证 |
-| Python 3.13 | ✅ | mock WebDAV + 构建脚本 |
+| Python 3.13 | ✅ | mock WebDAV + 三个检查脚本 |
 
 ## 两个库目录
 
@@ -30,11 +31,13 @@ lib/AnxSyncIo/        依赖 Arduino/ESP-IDF，桩下编译验证
   AnxProgressStore      进度 journal，读 reader 的 progress.bin
 ```
 
-两个命令：
+四个验证命令：
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File tests\host\run_tests.ps1   # 317 断言
 python tests\host\check_io_layer.py                                  # 编译+链接+冒烟
+python tests\host\check_ui_refs.py                                   # UI 引用检查
+python ..\tools\check_anx_patch.py                                   # anx-reader 引用检查
 ```
 
 ## 里程碑
@@ -62,8 +65,7 @@ python tests\host\check_io_layer.py                                  # 编译+�
 - [x] `AnxProgressBridge`：设备位置 ↔ 百分比、`/Books/x.epub` → `file/x.epub`、
       冲突仲裁、上传文档构建
 - [x] `AnxProgressStore`：`/.crosspoint/anx_progress.bin` journal，
-      读 reader 的 `progress.bin`（复用 `EpubReaderUtils` 的 6 字节格式），
-      journal 用 `ProgressFile` 式 crash-safe 写法
+      读 reader 的 `progress.bin`（复用 `EpubReaderUtils` 的 6 字节格式）
 
 **关键决策**（都有测试锁定）：
 
@@ -79,31 +81,55 @@ python tests\host\check_io_layer.py                                  # 编译+�
 **被测试揪出的真 bug**：边界归属错导致「章末页 ↔ 下章首页」丢失，round-trip 测试
 （遍历三章每一页）发现后修正语义并锁定。
 
-**编译检查揪出的**：`ProgressDocument` 缺 include、`buildUpload` 缺 `anx::`、
-桩缺 `std::string` 重载与 `flush()`、`<cmath>` 缺失。
+### M5 UI 与设置 `[x] 已编写 + 引用检查`
 
-### M5 UI 与设置 `[ ]`
-- [ ] 设置页：WebDAV URL / 账号 / 密码 / 仅 WiFi 同步 / 同步开关
-- [ ] 同步入口 Activity + 进度显示
-- [ ] i18n
+- [x] 设置页：WebDAV URL（含规范化）/ 账号 / 密码 / 仅 WiFi / 唤醒同步 / Sync now
+- [x] 同步 Activity：从 `loop()` 推进的状态机（**不是** FreeRTOS 任务 —— Activity 退出时被 delete）
+- [x] `SettingAction::AnxSync` + 菜单行 + dispatch
+- [x] 13 个 `STR_ANX_SYNC_*` i18n 键，`gen_i18n.py` 28 语言 / 427 键
+- [x] `tests/host/check_ui_refs.py` 四项检查（注入三个错误验证过）
 
 ## 验收边界
 
-| 里程碑 | 本机验证 | 只能靠真机 |
+| 里程碑 | 本机验证 | 只能靠真机/完整工具链 |
 |---|---|---|
 | M1 ✅ | 317 断言 + 真实 HTTP 对拍 | — |
 | M2 ✅ | 编译/链接/配置冒烟 | TLS 握手、SD 写入、真实 Nextcloud |
 | M3/M4 ✅ | 编译/链接 + 纯逻辑全覆盖 | 翻页后进度真的跳对页 |
-| M5 | 编译 | 按键、排版、功耗 |
+| M5 ✅ | 引用检查（非编译） | 按键、排版、功耗 |
+| anx-reader ✅ | 引用检查（非 analyze） | 真实合并行为 |
 
 ⚠️ `esp_http_client` 与 `HalStorage` 的桩**故意失败**，host 上不可能伪装成「同步成功」。
 
+## anx-reader 侧进度合并 `[x] 已编写 + 引用检查，未 dart analyze`
+
+两个 commit 在 [enoonmi/anx-reader@develop](https://github.com/enoonmi/anx-reader/tree/develop)：
+
+- [x] `3af1d38a` 新增 `lib/service/sync/onepage_progress_merge.dart`（217 行）
+- [x] `e2740d20` `sync.dart` 接线（+17 行，0 删除）
+
+- [x] 读 `anx/onepage/progress.json`，只合并 `reading_percentage`
+- [x] `lastReadPosition`（CFI）**从不赋值** —— 由检查脚本强制
+- [x] 时间戳守卫：只有严格更新才应用；差异 <0.1% 跳过，防来回抖动
+- [x] 单查询建索引，不是每本书一次 select
+- [x] `tools/check_anx_patch.py` 八项引用检查（脚本本身注入三个错误验证过）
+- [x] **两端契约人工核对一致**：路径 / schema / `file_path` / `reading_percentage` / `updated_at`
+
+⚠️ 本机**没有 Dart SDK**（无 `dart`、无 `flutter`、无 `.dart_tool`），
+所以**不是 `dart analyze`**。类型、null safety、参数个数全部未验证。
+
+详见 [06-anx-reader-patch.md](06-anx-reader-patch.md)。
+
 ## 阻塞点
 
-1. **PlatformIO 装不上** —— 固件整体编译未跑过，`lib/AnxSyncIo/` 从未被 PlatformIO 编译。
-2. **无真机** —— 无法验证任何设备行为。
-3. **git push 受限** —— MSYS `sh.exe` 在沙箱下建不了命名管道，credential helper 起不来。
-   全部走 GitHub MCP，本地 `reset --hard origin/main` 对齐。
+1. **PlatformIO 装不上** —— `pip install` 因沙箱不允许删除 pip 自己的临时目录而
+   `[Errno 13] Permission denied`；`python -m venv` 的 `ensurepip` 同样失败。
+   `--target` 和自定义 `TMP` 都试过。固件整体编译未跑过，
+   `lib/AnxSyncIo/` 与两个 UI 文件从未被 PlatformIO 编译。
+2. **没有 Dart SDK** —— anx-reader 补丁无法 `dart analyze` / `flutter build`。
+3. **无真机** —— 无法验证任何设备行为（渲染、按键、功耗、TLS、SD 写入）。
+4. **git push 受限** —— MSYS `sh.exe` 在沙箱下建不了命名管道，credential helper
+   起不来。全部走 GitHub MCP，本地 `reset --hard origin/<branch>` 对齐。
 
 ## 明确不做
 
