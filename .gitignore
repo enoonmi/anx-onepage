@@ -1,0 +1,19 @@
+# 两个 fork 是独立 git 仓库，不由本仓库跟踪
+/firmware/
+/anx-reader/
+
+# 本地临时/诊断产物
+/.tmp-home/
+/.probe/
+*.log
+*.tmp
+.env
+.env.*
+!.env.example
+
+# Windows / 编辑器
+Thumbs.db
+Desktop.ini
+.vscode/
+.idea/
+.DS_Store
