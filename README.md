@@ -13,8 +13,8 @@
 
 | 仓库 | 说明 | 上游 |
 |---|---|---|
-| [enoonmi/crosspoint-onepage](https://github.com/enoonmi/crosspoint-onepage) | 固件主战场，新增 `lib/AnxSync/` | [MoveCall/crosspoint-onepage](https://github.com/MoveCall/crosspoint-onepage) |
-| [enoonmi/anx-reader](https://github.com/enoonmi/anx-reader) | 安读侧补丁（B1：合并设备上报的进度） | [Anxcye/anx-reader](https://github.com/Anxcye/anx-reader) |
+| [enoonmi/crosspoint-onepage](https://github.com/enoonmi/crosspoint-onepage) | 固件主战场，新增 `lib/AnxSync/` 与 `lib/AnxSyncIo/` | [MoveCall/crosspoint-onepage](https://github.com/MoveCall/crosspoint-onepage) |
+| [enoonmi/anx-reader](https://github.com/enoonmi/anx-reader) | 安读侧补丁（合并设备上报的进度） | [Anxcye/anx-reader](https://github.com/Anxcye/anx-reader) |
 | [enoonmi/anx-onepage](https://github.com/enoonmi/anx-onepage) | 本仓库：docs / tools / 集成记录 | — |
 
 本地目录布局：
@@ -22,8 +22,8 @@
 ```
 D:\code\anx-onepage\
 ├── README.md          本文件
-├── docs\              协议、架构、开发环境、路线图
-├── tools\             mock WebDAV server / 桥接脚本
+├── docs\              协议、架构、开发环境、路线图、事故复盘
+├── tools\             mock WebDAV / 三个检查脚本
 ├── firmware\          clone of enoonmi/crosspoint-onepage（含嵌套 submodule）
 └── anx-reader\        clone of enoonmi/anx-reader
 ```
@@ -59,32 +59,52 @@ Puya PY25Q128HA 必须 `--no-stub`。详见 [docs/03-dev-environment.md](docs/03
 
 ## 当前进度
 
-**M1 已完成并在本机通过真实编译测试**：`lib/AnxSync/` 五个纯逻辑模块（HTTP 日期、
-WebDAV multistatus 解析、路径映射、差量决策、进度 JSON）共 201 条断言全部通过，
-并用 mock WebDAV 服务器做过真实 HTTP 端到端对拍。
+**M1–M5 与 anx-reader 侧补丁都已完成**，五项本机验证全部通过：
 
-代码在 [enoonmi/crosspoint-onepage@main](https://github.com/enoonmi/crosspoint-onepage/tree/main/lib/AnxSync)，
-测试说明见 [firmware/tests/host/README.md](https://github.com/enoonmi/crosspoint-onepage/blob/main/tests/host/README.md)。
+| 验证 | 结果 |
+|---|---|
+| 纯逻辑单测（固件） | `317 checks, 0 failures` |
+| IO 层编译 + 链接 + 冒烟 | `IO LAYER SMOKE OK` |
+| UI 引用检查 | `UI REFERENCE CHECK OK` |
+| anx-reader 补丁引用检查 | `ANX PATCH REFERENCE CHECK OK` |
+| **跨语言契约对拍** | `CONTRACT VERIFIED` |
 
 ```powershell
 cd firmware
-powershell -ExecutionPolicy Bypass -File tests\host\run_tests.ps1
-# => 201 checks, 0 failures / ALL TESTS PASSED
+powershell -ExecutionPolicy Bypass -File tests\host\run_tests.ps1   # 317 断言
+python tests\host\check_io_layer.py                                  # 编译+链接+冒烟
+python tests\host\check_ui_refs.py                                   # UI 引用检查
+python ..\tools\check_anx_patch.py                                   # anx-reader 引用检查
+python ..\tools\verify_contract.py                                   # 两端契约对拍
 ```
 
-> ⚠️ 这些是**开发机上的验证**。固件整体交叉编译（`pio run -e onepage`）尚未跑通
-> （PlatformIO 未安装），也没有真机，因此「设备上真的能同步」这一点**未经验证**。
+最后一项值得单独说明：`verify_contract.py` 会**编译并运行固件真实的进度管线**，
+把产出的 `progress.json` 交给**按手机端规则实现的解析器**再读一遍，确认两端
+在路径、schema、字段名、单位、时间戳语义上真的对得上。这不是文档里的断言，
+是可执行的检查。
+
+代码在 [enoonmi/crosspoint-onepage@main](https://github.com/enoonmi/crosspoint-onepage) 与
+[enoonmi/anx-reader@develop](https://github.com/enoonmi/anx-reader/tree/develop)。
+
+> ⚠️ **以上全部是开发机验证，零真机。** 三条硬限制：
+> 1. **PlatformIO 装不上**（沙箱不允许删除 pip 的临时目录）→ 固件整体交叉编译
+>    `pio run -e onepage` 从未跑过，`lib/AnxSyncIo/` 与两个 UI 文件从未被
+>    PlatformIO 编译，签名/类型错误未验证。
+> 2. **没有 Dart SDK** → anx-reader 补丁从未 `dart analyze`，类型与 null safety 未验证。
+> 3. **没有真机** → 渲染、按键、功耗、TLS 握手、SD 写入全部未验证。
 
 ## 路线
 
 - [x] 确认硬件/固件已覆盖阅读引擎、中文、HTTPS、进度映射
 - [x] 建立三个仓库并 fork 到 GitHub 账户
-- [x] **M1**：纯逻辑核心 + 201 条断言 + 真实 HTTP 对拍
-- [ ] **M2**：`AnxWebDavClient` —— PROPFIND 列 `anx/data/file/`、下载 EPUB 到 SD（需先跑通 PlatformIO 编译）
-- [ ] **M3**：手机→设备进度，接 `ProgressMapper::toCrossPoint()`
-- [ ] **M4**：设备→手机进度，安读侧 merge patch（方案 B1）
-- [ ] **M5**：设置页与同步入口 UI
-- [ ] 刷机验中文排版（不改代码，先确认体感）
+- [x] **M1**：纯逻辑核心（时间/解析/路径/决策/JSON）+ 317 断言 + 真实 HTTP 对拍
+- [x] **M2**：`AnxWebDavClient` + `AnxCredentialStore`（编译链接验证）
+- [x] **M3/M4**：进度双向（`AnxProgressLocator/Bridge/Store`，边界语义由测试锁定）
+- [x] **M5**：设置页 + 同步 Activity + 菜单接入 + 13 个 i18n 键
+- [x] **anx-reader patch**：`onepage_progress_merge.dart` + `sync.dart` 接线
+- [x] **跨语言契约对拍**
+- [ ] 真机验证（需硬件）
+- [ ] PlatformIO 交叉编译（需可用的工具链环境）
 
 详细拆解与阻塞点见 [docs/04-roadmap.md](docs/04-roadmap.md)。
 
