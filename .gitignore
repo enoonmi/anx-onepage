@@ -14,8 +14,11 @@
 # pip build scratch dirs left behind by a sandboxed install attempt
 pip-*/
 
-# scratch commit message files
-.commitmsg.txt
+# ad-hoc scratch files created during a session
+.[a-z0-9_]*.py
+.[a-z0-9_]*.txt
+.[a-z0-9_]*.json
+.[a-z0-9_]*.cpp
 
 # Windows / 编辑器
 Thumbs.db
