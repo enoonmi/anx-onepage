@@ -20,6 +20,17 @@ pip-*/
 .[a-z0-9_]*.json
 .[a-z0-9_]*.cpp
 
+# locally bootstrapped PlatformIO (see docs/07-toolchain-bootstrap.md)
+# The tool leaves unreadable pkg-installing-* directories behind, so git cannot
+# even walk this tree; ignore it wholesale.
+.pio-pkgs/
+.pio-wheels/
+.pio-core/
+.pio/
+
+# ACL repair reports and backups
+.acl-recovery/
+
 # Windows / 编辑器
 Thumbs.db
 Desktop.ini
