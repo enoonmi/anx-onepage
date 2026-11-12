@@ -13,7 +13,7 @@
 
 | 仓库 | 说明 | 上游 |
 |---|---|---|
-| [enoonmi/crosspoint-onepage](https://github.com/enoonmi/crosspoint-onepage) | 固件主战场，新增 `AnxWebDavClient` 等 | [MoveCall/crosspoint-onepage](https://github.com/MoveCall/crosspoint-onepage) |
+| [enoonmi/crosspoint-onepage](https://github.com/enoonmi/crosspoint-onepage) | 固件主战场，新增 `lib/AnxSync/` | [MoveCall/crosspoint-onepage](https://github.com/MoveCall/crosspoint-onepage) |
 | [enoonmi/anx-reader](https://github.com/enoonmi/anx-reader) | 安读侧补丁（B1：合并设备上报的进度） | [Anxcye/anx-reader](https://github.com/Anxcye/anx-reader) |
 | [enoonmi/anx-onepage](https://github.com/enoonmi/anx-onepage) | 本仓库：docs / tools / 集成记录 | — |
 
@@ -22,8 +22,8 @@
 ```
 D:\code\anx-onepage\
 ├── README.md          本文件
-├── docs\              协议、架构、开发环境笔记
-├── tools\             mock WebDAV server / 桥接脚本（待测）
+├── docs\              协议、架构、开发环境、路线图
+├── tools\             mock WebDAV server / 桥接脚本
 ├── firmware\          clone of enoonmi/crosspoint-onepage（含嵌套 submodule）
 └── anx-reader\        clone of enoonmi/anx-reader
 ```
@@ -57,14 +57,36 @@ pio run -e onepage
 烧录前先用 `esptool --chip esp32c61 -p <PORT> flash-id` 读 Flash 厂商：Winbond 走正常 stub，
 Puya PY25Q128HA 必须 `--no-stub`。详见 [docs/03-dev-environment.md](docs/03-dev-environment.md)。
 
-## 目标与路线
+## 当前进度
+
+**M1 已完成并在本机通过真实编译测试**：`lib/AnxSync/` 五个纯逻辑模块（HTTP 日期、
+WebDAV multistatus 解析、路径映射、差量决策、进度 JSON）共 201 条断言全部通过，
+并用 mock WebDAV 服务器做过真实 HTTP 端到端对拍。
+
+代码在 [enoonmi/crosspoint-onepage@main](https://github.com/enoonmi/crosspoint-onepage/tree/main/lib/AnxSync)，
+测试说明见 [firmware/tests/host/README.md](https://github.com/enoonmi/crosspoint-onepage/blob/main/tests/host/README.md)。
+
+```powershell
+cd firmware
+powershell -ExecutionPolicy Bypass -File tests\host\run_tests.ps1
+# => 201 checks, 0 failures / ALL TESTS PASSED
+```
+
+> ⚠️ 这些是**开发机上的验证**。固件整体交叉编译（`pio run -e onepage`）尚未跑通
+> （PlatformIO 未安装），也没有真机，因此「设备上真的能同步」这一点**未经验证**。
+
+## 路线
 
 - [x] 确认硬件/固件已覆盖阅读引擎、中文、HTTPS、进度映射
 - [x] 建立三个仓库并 fork 到 GitHub 账户
-- [ ] **Milestone 1**：刷机验中文排版（不改代码，先确认体感）
-- [ ] **Milestone 2**：`AnxWebDavClient` —— PROPFIND 列 `anx/data/file/`、下载 EPUB 到 SD、从 OPF 读书名（纯单向，零 SQLite、零进度）
-- [ ] **Milestone 3**：手机→设备进度，接 `ProgressMapper::toCrossPoint()`
-- [ ] **Milestone 4**：设备→手机进度，安读侧 merge patch（方案 B1）
+- [x] **M1**：纯逻辑核心 + 201 条断言 + 真实 HTTP 对拍
+- [ ] **M2**：`AnxWebDavClient` —— PROPFIND 列 `anx/data/file/`、下载 EPUB 到 SD（需先跑通 PlatformIO 编译）
+- [ ] **M3**：手机→设备进度，接 `ProgressMapper::toCrossPoint()`
+- [ ] **M4**：设备→手机进度，安读侧 merge patch（方案 B1）
+- [ ] **M5**：设置页与同步入口 UI
+- [ ] 刷机验中文排版（不改代码，先确认体感）
+
+详细拆解与阻塞点见 [docs/04-roadmap.md](docs/04-roadmap.md)。
 
 ## 关键约束（务必先读）
 
