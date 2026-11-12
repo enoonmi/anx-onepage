@@ -14,6 +14,9 @@
 # pip build scratch dirs left behind by a sandboxed install attempt
 pip-*/
 
+# scratch commit message files
+.commitmsg.txt
+
 # Windows / 编辑器
 Thumbs.db
 Desktop.ini
